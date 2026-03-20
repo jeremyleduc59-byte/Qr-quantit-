@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="QR Quantité">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+<script src="https://unpkg.com/@zxing/library@latest/umd/index.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bwip-js@3/dist/bwip-js-min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Syne:wght@800&display=swap');
@@ -219,7 +219,7 @@
   </div>
 </div>
 <script>
-  let stream = null, scanInterval = null, scanning = false;
+  let stream = null, zxingReader = null, scanning = false;
   let currentRaw = '';
   let qField = null;
   let qrTimer = null;
@@ -262,47 +262,45 @@
 
   async function startLive() {
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: false
-      });
-      var video = document.getElementById('video');
-      video.srcObject = stream; await video.play();
+      const hints = new Map();
+      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+        ZXing.BarcodeFormat.DATA_MATRIX,
+        ZXing.BarcodeFormat.QR_CODE,
+        ZXing.BarcodeFormat.CODE_128,
+        ZXing.BarcodeFormat.CODE_39
+      ]);
+      hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+      zxingReader = new ZXing.BrowserMultiFormatReader(hints);
       document.getElementById('live-view').classList.add('active');
       document.getElementById('cam-placeholder').style.display = 'none';
       document.getElementById('btn-start').style.display = 'none';
       document.getElementById('btn-stop').style.display = 'flex';
       scanning = true;
-      scanInterval = setInterval(scanLiveFrame, 300);
+      await zxingReader.decodeFromVideoDevice(null, 'video', function(result, err) {
+        if (result && scanning) {
+          scanning = false;
+          var flash = document.getElementById('flash-ok');
+          flash.classList.add('show');
+          setTimeout(function(){
+            flash.classList.remove('show');
+            stopLive();
+            showResult(result.getText());
+          }, 600);
+        }
+      });
     } catch(err) {
-      toast(err.name === 'NotAllowedError' ? '❌ Permission caméra refusée' : '❌ Caméra inaccessible');
+      toast(err.name === 'NotAllowedError' ? '❌ Permission caméra refusée' : '❌ Caméra inaccessible : ' + err.message);
     }
   }
 
   function stopLive() {
-    scanning = false; clearInterval(scanInterval);
+    scanning = false;
+    if (zxingReader) { try { zxingReader.reset(); } catch(e){} zxingReader = null; }
     if (stream) { stream.getTracks().forEach(function(t){ t.stop(); }); stream = null; }
     document.getElementById('live-view').classList.remove('active');
     document.getElementById('cam-placeholder').style.display = 'block';
     document.getElementById('btn-start').style.display = 'flex';
     document.getElementById('btn-stop').style.display = 'none';
-  }
-
-  function scanLiveFrame() {
-    if (!scanning) return;
-    var video = document.getElementById('video');
-    if (video.readyState < video.HAVE_ENOUGH_DATA) return;
-    var canvas = document.getElementById('canvas');
-    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-    var ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0);
-    var code = jsQR(ctx.getImageData(0,0,canvas.width,canvas.height).data, canvas.width, canvas.height, { inversionAttempts:'attemptBoth' });
-    if (code && code.data) {
-      scanning = false; clearInterval(scanInterval);
-      var flash = document.getElementById('flash-ok');
-      flash.classList.add('show');
-      setTimeout(function(){ flash.classList.remove('show'); stopLive(); showResult(code.data); }, 600);
-    }
   }
 
   function handleManual() {
